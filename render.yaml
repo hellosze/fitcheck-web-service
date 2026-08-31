@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: resume-generator-app
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:app"
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FLASK_SECRET_KEY
+        generateValue: true
