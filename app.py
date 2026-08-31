@@ -174,16 +174,29 @@ def index():
             # Convert HTML resume to PDF via WeasyPrint
             HTML(string=clean_html).write_pdf(resume_pdf_path)
 
-            # Convert Cover Letter text to simple HTML then PDF
-            cl_html_wrapper = f"<html><body style='font-family:sans-serif; font-size:10pt; line-height:1.5; margin:20mm;'><pre style='white-space:pre-wrap; font-family:inherit;'>{clean_cl}</pre></body></html>"
-            HTML(string=cl_html_wrapper).write_pdf(cl_pdf_path)
 
+            # Save Cover Letter directly as a .txt file
+            cl_txt_path = os.path.join(temp_dir, f"Cover_Letter_{sanitized_job_goal}.txt")
+            with open(cl_txt_path, "w", encoding="utf-8") as f:
+                f.write(clean_cl)
+            
             return render_template(
                 "result.html",
                 job_goal=job_title_company,
                 resume_file=f"Resume_{sanitized_job_goal}.pdf",
-                cl_file=f"Cover_Letter_{sanitized_job_goal}.pdf"
+                cl_file=f"Cover_Letter_{sanitized_job_goal}.txt"
             )
+
+            # Convert Cover Letter text to simple HTML then PDF
+            # cl_html_wrapper = f"<html><body style='font-family:sans-serif; font-size:10pt; line-height:1.5; margin:20mm;'><pre style='white-space:pre-wrap; font-family:inherit;'>{clean_cl}</pre></body></html>"
+            # HTML(string=cl_html_wrapper).write_pdf(cl_pdf_path)
+
+            # return render_template(
+            #    "result.html",
+            #    job_goal=job_title_company,
+            #    resume_file=f"Resume_{sanitized_job_goal}.pdf",
+            #    cl_file=f"Cover_Letter_{sanitized_job_goal}.pdf"
+            #)
 
         except Exception as e:
             flash(f"Error generating documents: {str(e)}", "error")
