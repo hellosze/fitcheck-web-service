@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Generation Complete</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+        .btn { display: inline-block; padding: 10px 15px; margin: 10px 5px 10px 0; background-color: #28a745; color: white; text-decoration: none; border-radius: 4px; }
+        .btn-secondary { background-color: #6c757d; }
+    </style>
+</head>
+<body>
+    <h2>Success!</h2>
+    <p>Target Goal Detected: <strong>{{ job_goal }}</strong></p>
+    
+    <p>Your application materials have been compiled into PDFs:</p>
+    
+    <a class="btn" href="{{ url_for('download_file', filename=resume_file) }}">Download Tailored Resume (PDF)</a>
+    <a class="btn" href="{{ url_for('download_file', filename=cl_file) }}">Download Cover Letter (PDF)</a>
+    
+    <br><br>
+    <a class="btn btn-secondary" href="{{ url_for('index') }}">← Generate Another</a>
+</body>
+</html>
