@@ -1,46 +1,40 @@
 import os
 import re
-import io
-from datetime import datetime
+import tempfile
 import requests
 from bs4 import BeautifulSoup
-from flask import Flask, render_template, request, send_file, flash, redirect, url_for, session
+from datetime import datetime
+from flask import Flask, request, render_template_string, send_file, flash, redirect, url_for
+from weasyprint import HTML
 from google import genai
 from google.genai import types
-from weasyprint import HTML
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super-secret-key-cloud-run")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super-secret-key")
 
-# Static Resume URL
+# Retrieve API Key from Cloud Run Environment Variables
+API_KEY = os.environ.get("GEMINI_API_KEY")
 URL_RESUME = "https://docs.google.com/document/d/1CR3_ALCHvWhfgCTQdbqqYUD-k32LJH6M-8MBY3479O0/edit?usp=sharing"
 
-# Get Gemini API Key from environment variables
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-
-def get_gemini_client():
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY environment variable is not configured.")
-    return genai.Client(api_key=GEMINI_API_KEY)
-
+# ==============================================================================
+# HELPER FUNCTIONS TO FETCH TEXT DATA
+# ==============================================================================
 def fetch_google_doc_text(url):
-    """Converts Google Doc view link to export text stream."""
     doc_id_match = re.search(r"/d/([a-zA-Z0-9-_]+)", url)
     if not doc_id_match:
         raise ValueError("Invalid Google Doc URL structure.")
     export_url = f"https://docs.google.com/document/d/{doc_id_match.group(1)}/export?format=txt"
-    response = requests.get(export_url, timeout=10)
+    response = requests.get(export_url)
     if response.status_code == 200:
         return response.text
     else:
-        res = requests.get(url, timeout=10)
+        res = requests.get(url)
         soup = BeautifulSoup(res.text, 'html.parser')
         return soup.get_text(separator='\n')
 
 def fetch_generic_url_text(url):
-    """Scrapes raw text from job posting link."""
     try:
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
         soup = BeautifulSoup(res.text, 'html.parser')
         for script in soup(["script", "style"]):
             script.decompose()
@@ -48,126 +42,198 @@ def fetch_generic_url_text(url):
     except Exception as e:
         return f"Could not automatically fetch text from URL due to: {str(e)}"
 
-# In-memory storage cache for stateless server execution
-GENERATED_CACHE = {}
-
-@app.route("/", methods=["GET", "POST"])
-def index():
-    if request.method == "POST":
-        job_url = request.form.get("job_url", "").strip()
-        if not job_url:
-            flash("Please enter a valid Job Description URL.", "error")
-            return redirect(url_for("index"))
-
-        try:
-            client = get_gemini_client()
-
-            raw_resume = fetch_google_doc_text(URL_RESUME)
-            raw_jd = fetch_generic_url_text(job_url)
-            current_date_str = datetime.now().strftime("%B %d, %Y")
-
-            # Consolidated prompt in 1 single Gemini call to prevent 503 errors and speed up execution
-            combined_prompt = f"""
-You are an expert resume writer, technical recruiter, and executive layout designer.
-Analyze the target Job Description and Source Resume below. Perform the following tasks:
-
-Task 1: Extract official Job Title and Company Name in format "Job Title at Company Name".
-Task 2: Generate a single-page standalone HTML resume with embedded print CSS styling (@page {{ size: letter; margin: 10mm 12mm; }}).
-Task 3: Generate a punchy, 2-paragraph cover letter for candidate Sze Chan (sze.m.chan@gmail.com | 646-269-7616) dated {current_date_str}.
-
-You MUST strictly format your output with these EXACT delimiter tags:
-===JOB_GOAL===
-[Job Title at Company]
-===RESUME_HTML===
-[Full standalone HTML text starting with <!DOCTYPE html> and ending with </html> without markdown code blocks]
-===COVER_LETTER===
-[Full Cover Letter plain text]
-
---- TARGET JOB DESCRIPTION ---
-{raw_jd[:4000]}
-
---- SOURCE RESUME ---
-{raw_resume}
+# ==============================================================================
+# HTML TEMPLATES FOR CLOUD RUN WEB INTERFACE
+# ==============================================================================
+INDEX_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Resume & Cover Letter Generator</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; }
+        input[type="text"] { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; }
+        button { padding: 10px 20px; background-color: #007bff; color: white; border: none; cursor: pointer; margin-right: 10px; }
+        button:hover { background-color: #0056b3; }
+        .form-group { margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <h2>Generate Tailored Resume & Cover Letter</h2>
+    <form action="/generate" method="post">
+        <div class="form-group">
+            <label for="job_url">Job Description URL:</label>
+            <input type="text" id="job_url" name="job_url" placeholder="https://example.com/job-posting" required>
+        </div>
+        <button type="submit" name="action" value="resume">Generate Resume (PDF)</button>
+        <button type="submit" name="action" value="cover_letter_pdf">Generate Cover Letter (PDF)</button>
+        <button type="submit" name="action" value="cover_letter_txt">Generate Cover Letter (TXT)</button>
+    </form>
+</body>
+</html>
 """
 
-            # Single API call using high-availability model
-            response = client.models.generate_content(
-                model='gemini-3.5-flash-lite',
-                contents=combined_prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.2
+# ==============================================================================
+# FLASK ROUTES
+# ==============================================================================
+@app.route("/")
+def index():
+    return render_template_string(INDEX_HTML)
+
+@app.route("/generate", methods=["POST"])
+def generate():
+    job_url = request.form.get("job_url", "").strip()
+    action = request.form.get("action")
+
+    if not job_url:
+        return "Please provide a valid Job URL", 400
+
+    # Fetch Data
+    raw_resume = fetch_google_doc_text(URL_RESUME)
+    raw_jd = fetch_generic_url_text(job_url)
+
+    # Initialize Gemini
+    client = genai.Client(api_key=API_KEY)
+
+    # Extract Title/Company
+    extraction_prompt = f"""
+    Analyze the following raw text scraped from a job description webpage.
+    Extract the official Job Title and the Company Name.
+    Return ONLY a short string in the format: "Job Title at Company Name". Do not add any extra text.
+
+    --- JOB DESCRIPTION TEXT ---
+    {raw_jd[:4000]}
+    """
+    extract_response = client.models.generate_content(
+        model='gemini-3.5-flash-lite',
+        contents=extraction_prompt,
+        config=types.GenerateContentConfig(temperature=0.0)
+    )
+    JOB_TITLE_COMPANY = extract_response.text.strip()
+    sanitized_job_goal = re.sub(r'[\\/*?:"<>|]', "", JOB_TITLE_COMPANY)
+
+    user_content = f"""
+    Please evaluate this target job and multi-page source resume data.
+
+    ---
+    ### TARGET JOB TITLE & COMPANY:
+    {JOB_TITLE_COMPANY}
+
+    ---
+    ### TARGET JOB DESCRIPTION:
+    {raw_jd}
+
+    ---
+    ### SOURCE MULTI-PAGE RESUME:
+    {raw_resume}
+    """
+
+    # --- RESUME GENERATION ---
+    if action == "resume":
+        resume_system_instruction = f"""
+        You are an expert resume writer, technical recruiter, and executive layout designer.
+        Your task is to ingest a comprehensive, multi-page resume, match it against a target Job Description, and output a raw, standalone HTML page (with embedded print-CSS styling) that will generate a perfectly spaced, print-ready, single-page PDF resume.
+
+        Target Job Goal: {JOB_TITLE_COMPANY}
+
+        ### 1. Resume Structural Layout & Tiering Logic
+        * **Highly Concise Summary:** STAR framework aligned summary.
+        * **No Standalone Skills Section:** Weave keywords into experience.
+        * **Tier 1 Experience:** Prioritize Optimera, Penske Media Corp. (3-5 bullets each).
+        * **Tier 2 Experience:** MPW Enterprises, Undertone, Frankly Media, American Media Inc, XO Group (1 bullet each).
+        * Include technical skills: Google Ad Manager (GAM & API), Prebid.js, Header Bidding, OpenRTB, VAST, Ad Verification, Python, SQL, JavaScript, Docker, Gemini.
+        * Include education: NYU Polytechnic (MS CS, 2007), CCNY (BS CS, 2004).
+
+        ### 2. Strict PDF Blueprint Layout Constraints (HTML/CSS)
+        - `@page {{ size: letter; margin: 10mm 12mm 10mm 12mm; }}`
+        - Set base `body` font-size strictly to `8.5pt` with `line-height: 1.25`.
+
+        ### 3. Output Format Requirement
+        Your response must contain ONLY valid, pure HTML text string starting directly with <!DOCTYPE html> and ending with </html>.
+        """
+        resume_response = client.models.generate_content(
+            model='gemini-3.5-flash-lite',
+            contents=user_content,
+            config=types.GenerateContentConfig(
+                system_instruction=resume_system_instruction,
+                temperature=0.2,
+            )
+        )
+        clean_html = resume_response.text.strip()
+        if clean_html.startswith("```html"):
+            clean_html = clean_html[7:]
+        if clean_html.endswith("```"):
+            clean_html = clean_html[:-3]
+
+        # Render PDF to memory/tempfile and stream to client
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
+            HTML(string=clean_html.strip()).write_pdf(tmp_pdf.name)
+            return send_file(
+                tmp_pdf.name,
+                as_attachment=True,
+                download_name=f"Sze Chan - {sanitized_job_goal}.pdf",
+                mimetype="application/pdf"
+            )
+
+    # --- COVER LETTER GENERATION ---
+    elif action in ["cover_letter_pdf", "cover_letter_txt"]:
+        current_date_str = datetime.now().strftime("%B %d, %Y")
+        cl_system_instruction = f"""
+        You are an expert career coach. Write a tailored, 2-paragraph cover letter based on candidate profile and target role.
+
+        Inputs:
+        - Candidate Name: Sze Chan
+        - Contact: sze.m.chan@gmail.com | 646-269-7616
+        - Target Company: {JOB_TITLE_COMPANY}
+        - Date: {current_date_str}
+
+        Keep body text strictly TWO paragraphs (3 to 6 sentences total).
+        End with: "Thank you for your time and consideration."
+        """
+        cl_response = client.models.generate_content(
+            model='gemini-3.5-flash-lite',
+            contents=user_content,
+            config=types.GenerateContentConfig(
+                system_instruction=cl_system_instruction,
+                temperature=0.3,
+            )
+        )
+        clean_cl = cl_response.text.strip()
+
+        if action == "cover_letter_txt":
+            with tempfile.NamedTemporaryFile(mode="w+", suffix=".txt", delete=False) as tmp_txt:
+                tmp_txt.write(clean_cl)
+                tmp_txt.flush()
+                return send_file(
+                    tmp_txt.name,
+                    as_attachment=True,
+                    download_name=f"Sze Chan - Cover Letter - {sanitized_job_goal}.txt",
+                    mimetype="text/plain"
                 )
-            )
 
-            output = response.text
-            job_goal = output.split("===JOB_GOAL===")[1].split("===RESUME_HTML===")[0].strip()
-            clean_html = output.split("===RESUME_HTML===")[1].split("===COVER_LETTER===")[0].strip()
-            clean_cl = output.split("===COVER_LETTER===")[1].strip()
-
-            # Clean markdown fences if model outputs them
-            if clean_html.startswith("```html"):
-                clean_html = clean_html[7:]
-            if clean_html.endswith("```"):
-                clean_html = clean_html[:-3]
-            clean_html = clean_html.strip()
-
-            # Generate PDF in-memory buffer
-            pdf_buffer = io.BytesIO()
-            HTML(string=clean_html).write_pdf(pdf_buffer)
-            pdf_buffer.seek(0)
-
-            # Generate a session-scoped unique ID to store artifacts in-memory
-            session_id = datetime.now().strftime("%Y%m%d%H%M%S")
-            sanitized_job_goal = re.sub(r'[\\/*?:"<>|]', "", job_goal)
-
-            GENERATED_CACHE[session_id] = {
-                "pdf_data": pdf_buffer.getvalue(),
-                "cl_data": clean_cl.encode("utf-8"),
-                "job_goal": job_goal,
-                "sanitized_goal": sanitized_job_goal
-            }
-
-            session["current_id"] = session_id
-
-            return render_template(
-                "result.html",
-                job_goal=job_goal,
-                session_id=session_id
-            )
-
-        except Exception as e:
-            flash(f"Error generating documents: {str(e)}", "error")
-            return redirect(url_for("index"))
-
-    return render_template("index.html")
-
-@app.route("/download/resume/<session_id>")
-def download_resume(session_id):
-    cache = GENERATED_CACHE.get(session_id)
-    if not cache:
-        flash("Session expired or file not found. Please generate again.", "error")
-        return redirect(url_for("index"))
-
-    return send_file(
-        io.BytesIO(cache["pdf_data"]),
-        mimetype="application/pdf",
-        as_attachment=True,
-        download_name=f"Sze Chan - Resume - {cache['sanitized_goal']}.pdf"
-    )
-
-@app.route("/download/cover-letter/<session_id>")
-def download_cover_letter(session_id):
-    cache = GENERATED_CACHE.get(session_id)
-    if not cache:
-        flash("Session expired or file not found. Please generate again.", "error")
-        return redirect(url_for("index"))
-
-    return send_file(
-        io.BytesIO(cache["cl_data"]),
-        mimetype="text/plain",
-        as_attachment=True,
-        download_name=f"Sze Chan - Cover Letter - {cache['sanitized_goal']}.txt"
-    )
+        elif action == "cover_letter_pdf":
+            # Wrap plain text in minimal HTML for proper WeasyPrint PDF conversion
+            cl_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    @page {{ size: letter; margin: 20mm; }}
+                    body {{ font-family: Arial, sans-serif; font-size: 11pt; line-height: 1.5; white-space: pre-wrap; }}
+                </style>
+            </head>
+            <body>{clean_cl}</body>
+            </html>
+            """
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
+                HTML(string=cl_html).write_pdf(tmp_pdf.name)
+                return send_file(
+                    tmp_pdf.name,
+                    as_attachment=True,
+                    download_name=f"Sze Chan - Cover Letter - {sanitized_job_goal}.pdf",
+                    mimetype="application/pdf"
+                )
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
