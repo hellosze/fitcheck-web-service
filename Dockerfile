@@ -1,21 +1,28 @@
-FROM python:3.10-slim
+FROM python:3.11-slim
 
-# Install system C-libraries required for WeasyPrint / Pango / Cairo
-RUN apt-get update && apt-get install -y \
-    libpango-1.0-0 \
-    libpangoft2-1.0-0 \
-    libpangocairo-1.0-0 \
-    libgdk-pixbuf-xlib-2.0-0 \
+# Install WeasyPrint system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3-dev \
+    python3-pip \
+    python3-setuptools \
+    python3-wheel \
+    python3-cffi \
     libcairo2 \
+    libpango-1.0-0 \
+    pangocairo-1.0-0 \
+    libgdk-pixbuf2.0-0 \
+    libffi-dev \
     shared-mime-info \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+# Install Python requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Run Gunicorn listening on port 8080 (Cloud Run's default port)
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "2", "app:app"]
+ENV PORT=8080
+CMD ["python", "app.py"]
