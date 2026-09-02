@@ -1,7 +1,5 @@
-Flask==3.0.3
-requests==2.32.3
-beautifulsoup4==4.12.3
+flask
+requests
+beautifulsoup4
 google-genai
-gunicorn==23.0.0
-weasyprint==52.5
-tenacity==9.0.0
+weasyprint
