@@ -92,7 +92,7 @@ You MUST strictly format your output with these EXACT delimiter tags:
 
             # Single API call using high-availability model
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-3.5-flash-lite',
                 contents=combined_prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.2
