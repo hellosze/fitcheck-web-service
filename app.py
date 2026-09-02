@@ -139,6 +139,7 @@ def generate():
         ### 1. Resume Structural Layout & Tiering Logic
         * **Highly Concise Summary:** STAR framework aligned summary.
         * **No Standalone Skills Section:** Weave keywords into experience.
+        * **No linkedin links.
         * **Tier 1 Experience:** Prioritize Optimera, Penske Media Corp. (3-5 bullets each).
         * **Tier 2 Experience:** MPW Enterprises, Undertone, Frankly Media, American Media Inc, XO Group (1 bullet each).
         * Include technical skills: Google Ad Manager (GAM & API), Prebid.js, Header Bidding, OpenRTB, VAST, Ad Verification, Python, SQL, JavaScript, Docker, Gemini.
