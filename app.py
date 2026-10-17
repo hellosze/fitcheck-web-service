@@ -68,6 +68,10 @@ INDEX_HTML = """
         <button type="submit" name="action" value="resume">Generate Resume (PDF)</button>
         <button type="submit" name="action" value="cover_letter_pdf">Generate Cover Letter (PDF)</button>
     </form>
+    <p>Please Note: This application is hosted on Google Cloud Platform and is intended for demonstration purposes.<br />
+    It is currently using Google Gemini 3.5-flash-lite<br />
+    If PDF generation fails, it may be due to Google Gemini Free Tier rate limits or temporary high usage. Please try again in a few minutes.
+    </p>
 </body>
 </html>
 """
