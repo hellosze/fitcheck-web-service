@@ -59,7 +59,7 @@ INDEX_HTML = """
     </style>
 </head>
 <body>
-    <h2>Generate Tailored Resume & Cover Letter</h2>
+    <h2>Fit Check - Resume and Cover Letter Optimization</h2>
     <form action="/generate" method="post">
         <div class="form-group">
             <label for="job_url">Job Description URL:</label>
@@ -67,7 +67,6 @@ INDEX_HTML = """
         </div>
         <button type="submit" name="action" value="resume">Generate Resume (PDF)</button>
         <button type="submit" name="action" value="cover_letter_pdf">Generate Cover Letter (PDF)</button>
-        <button type="submit" name="action" value="cover_letter_txt">Generate Cover Letter (TXT)</button>
     </form>
 </body>
 </html>
